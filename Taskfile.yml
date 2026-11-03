@@ -82,9 +82,11 @@ tasks:
       # versions.yml, plus .local/registries.yml (git-ignored, same `registries:` list) when it exists
       REGISTRIES:
         sh: |
-          files=versions.yml
-          if [ -f .local/registries.yml ]; then files="$files .local/registries.yml"; fi
-          yq '.registries[]' $files
+          if [ -f .local/registries.yml ]; then
+            yq --no-doc '.registries[]' versions.yml .local/registries.yml
+          else
+            yq --no-doc '.registries[]' versions.yml
+          fi
       # YYMMDD, then YYMMDD-1, YYMMDD-2... for further pushes the same day
       STAMP:
         sh: |
