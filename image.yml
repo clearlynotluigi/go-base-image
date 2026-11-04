@@ -1,0 +1,13 @@
+# The image config: everything the build needs besides the Go version, which comes from the command (task build:<go version>).
+# Keys under `args` are passed to the build as --build-arg, so they match the Dockerfile ARG names.
+
+image: go-base
+
+registries:
+  - docker.io/mariort
+
+args:
+  GOLANGCI_LINT_VERSION: v2.15.0
+  GOSEC_VERSION: v2.30.0
+  GO_DELVE_VERSION: v1.27.2
+  TASK_VERSION: v3.54.0

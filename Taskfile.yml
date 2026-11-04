@@ -1,8 +1,5 @@
 version: '3'
 
-# Needs task, podman, git, yq (mikefarah v4).
-# build:<version> and push:<version> are the permanent interface: same command at any point in history.
-
 includes:
   local:
     taskfile: ./.local/Taskfile.yml
@@ -14,7 +11,7 @@ vars:
   # override for a quick native build: task build:1.27 PLATFORMS=linux/arm64
   PLATFORMS: linux/amd64,linux/arm64
   IMAGE:
-    sh: yq '.image' versions.yml
+    sh: yq '.image' image.yml
 
 tasks:
   default:
@@ -22,107 +19,72 @@ tasks:
     cmds:
       - task --list-all
 
-  versions:
-    desc: "List versions and whether each is live or frozen"
-    silent: true
-    cmds:
-      - yq '.versions | to_entries | .[] | .key + "  " + (.value.ref // "live")' versions.yml
-
   build:*:
-    desc: "Build one version, e.g. task build:1.27"
+    desc: "Build the image, e.g. task build:1.27 (the Go version is also the image tag). Extra build flags go after --"
     vars:
       VERSION: '{{index .MATCH 0}}'
-      REF:
-        sh: yq '.versions["{{.VERSION}}"].ref // ""' versions.yml
-    preconditions:
-      - sh: yq -e '.versions["{{.VERSION}}"]' versions.yml > /dev/null
-        msg: "Unknown version '{{.VERSION}}'. See: task versions"
-    cmds:
-      - task: '{{if .REF}}build-frozen{{else}}build-live{{end}}'
-        vars: { VERSION: '{{.VERSION}}', REF: '{{.REF}}' }
-
-  build:all:
-    desc: "Build every version"
-    vars:
-      VERSIONS:
-        sh: yq '.versions | keys | .[]' versions.yml
-    cmds:
-      - for: { var: VERSIONS, split: "\n" }
-        task: 'build:{{.ITEM}}'
-
-  build-live:
-    internal: true
-    vars:
       # every key under args becomes --build-arg KEY=value
       BUILD_ARGS:
-        sh: yq '(.versions["{{.VERSION}}"].args // {}) | to_entries | map("--build-arg " + .key + "=" + .value) | join(" ")' versions.yml
+        sh: yq '.args | to_entries | map("--build-arg " + .key + "=" + .value) | join(" ")' image.yml
     cmds:
-      # --manifest appends to an existing list, so start from a fresh one
       - '{{.ENGINE}} manifest rm --ignore {{.IMAGE}}:{{.VERSION}}'
-      - '{{.ENGINE}} build --platform {{.PLATFORMS}} --manifest {{.IMAGE}}:{{.VERSION}} {{.BUILD_ARGS}} --build-arg GO_VERSION={{.VERSION}} .'
+      - '{{.ENGINE}} build --platform {{.PLATFORMS}} --manifest {{.IMAGE}}:{{.VERSION}} {{.BUILD_ARGS}} --build-arg GO_VERSION={{.VERSION}} {{.CLI_ARGS}} .'
 
-  build-frozen:
-    internal: true
+  tag:*:
+    desc: "Create the git tag for a release and push it to origin, e.g. task tag:1.27"
+    vars:
+      TAG: '{{index .MATCH 0}}'
+    preconditions:
+      - sh: '[ -z "$(git status --porcelain -- Dockerfile image.yml)" ]'
+        msg: "Dockerfile or image.yml has uncommitted changes: commit first, the tag has to point at the recipe it names."
+      - sh: '! git ls-remote --exit-code --tags origin "refs/tags/{{.TAG}}" > /dev/null 2>&1'
+        msg: "Tag '{{.TAG}}' already exists on origin. Tags are never moved: pick a new tag name."
     cmds:
-      # same task name, run inside a checkout of the frozen ref
+      # no -f anywhere: an existing tag fails loudly, tags are never moved
+      - git tag {{.TAG}}
+      - |
+        git push origin refs/tags/{{.TAG}} || {
+          echo "Tag {{.TAG}} exists locally but was not pushed. Fix the remote, then run: git push origin refs/tags/{{.TAG}}" >&2
+          exit 1
+        }
+
+  push:*:
+    desc: "Push the built image to every registry, once its git tag is on origin, e.g. task push:1.27"
+    vars:
+      TAG: '{{index .MATCH 0}}'
+      # image.yml, plus .local/registries.yml (git-ignored, same `registries:` list) when it exists
+      REGISTRIES:
+        sh: |
+          if [ -f .local/registries.yml ]; then
+            yq --no-doc '.registries[]' image.yml .local/registries.yml
+          else
+            yq --no-doc '.registries[]' image.yml
+          fi
+      # a perk: the registry also gets <tag>-YYMMDD, overwritten if pushed twice the same day
+      STAMP:
+        sh: date +%y%m%d
+    preconditions:
+      - sh: git ls-remote --exit-code --tags origin "refs/tags/{{.TAG}}" > /dev/null
+        msg: "Git tag '{{.TAG}}' is not on origin (or origin is unreachable). Create it with `task tag:{{.TAG}}` if needed, then run: git push origin refs/tags/{{.TAG}}"
+    cmds:
+      - for: { var: REGISTRIES, split: "\n" }
+        cmd: |
+          for tag in {{.TAG}} {{.TAG}}-{{.STAMP}}; do
+            {{.ENGINE}} manifest push --all {{.IMAGE}}:{{.TAG}} docker://{{.ITEM}}/{{.IMAGE}}:$tag
+          done
+
+  rebuild:*:
+    desc: "Build from the past: check out an existing git tag in a temporary worktree and build there, e.g. task rebuild:1.26"
+    vars:
+      TAG: '{{index .MATCH 0}}'
+    preconditions:
+      - sh: git rev-parse -q --verify "refs/tags/{{.TAG}}" > /dev/null
+        msg: "No git tag '{{.TAG}}'. See: git tag -l"
+    cmds:
       - |
         set -e
         dir=$(mktemp -d)
         trap 'git worktree remove --force "$dir" 2>/dev/null || true' EXIT
-        git worktree add --detach "$dir" {{.REF}}
+        git worktree add --detach "$dir" refs/tags/{{.TAG}}
         cd "$dir"
-        task build:{{.VERSION}}
-
-  push:*:
-    desc: "Push a built version to every registry in versions.yml and .local/registries.yml, e.g. task push:1.27"
-    vars:
-      VERSION: '{{index .MATCH 0}}'
-      REF:
-        sh: yq '.versions["{{.VERSION}}"].ref // ""' versions.yml
-      # versions.yml, plus .local/registries.yml (git-ignored, same `registries:` list) when it exists
-      REGISTRIES:
-        sh: |
-          if [ -f .local/registries.yml ]; then
-            yq --no-doc '.registries[]' versions.yml .local/registries.yml
-          else
-            yq --no-doc '.registries[]' versions.yml
-          fi
-      # YYMMDD, then YYMMDD-1, YYMMDD-2... for further pushes the same day
-      STAMP:
-        sh: |
-          base=$(date +%y%m%d)
-          stamp=$base
-          n=0
-          while git rev-parse -q --verify "refs/tags/{{.VERSION}}-$stamp" > /dev/null; do
-            n=$((n + 1))
-            stamp="$base-$n"
-          done
-          echo "$stamp"
-    preconditions:
-      # the release tag is created after the push, so fail before pushing anything if it cannot be made
-      - sh: git rev-parse -q --verify HEAD
-        msg: "No commit yet: make one first, the release tag needs a commit to point at"
-    cmds:
-      - for: { var: REGISTRIES, split: "\n" }
-        cmd: |
-          for tag in {{.VERSION}} {{.VERSION}}-{{.STAMP}}; do
-            {{.ENGINE}} manifest push --all {{.IMAGE}}:{{.VERSION}} docker://{{.ITEM}}/{{.IMAGE}}:$tag
-          done
-      - cmd: |
-          git tag {{.VERSION}}-{{.STAMP}}
-          git push origin refs/tags/{{.VERSION}}-{{.STAMP}}
-        if: '{{not .REF}}'
-
-  freeze:*:
-    desc: "Freeze a version at its newest release tag, e.g. task freeze:1.26"
-    vars:
-      VERSION: '{{index .MATCH 0}}'
-      TAG:
-        sh: git tag -l '{{.VERSION}}-*' --sort=-version:refname | head -n1
-    preconditions:
-      - sh: '[ -n "{{.TAG}}" ]'
-        msg: "No release tag '{{.VERSION}}-*' yet: push this version once first."
-    cmds:
-      - |
-        yq -i '.versions["{{.VERSION}}"] = {"ref": "{{.TAG}}"}' versions.yml
-        echo "{{.VERSION}} is now frozen at {{.TAG}}. Commit versions.yml."
+        task build:{{.TAG}}

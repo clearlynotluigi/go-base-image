@@ -12,7 +12,7 @@ A small, generic Go image for CI and development: the official `golang` Alpine i
 | [delve](https://github.com/go-delve/delve) | debugger |
 | `git`, `bash`, `curl`, `jq`, `yq`, `tini`, `tzdata`, `ca-certificates` | the usual runner basics |
 
-Exact versions per Go version live in [`versions.yml`](versions.yml).
+Tool versions live in [`image.yml`](image.yml).
 
 ## 🚀 Usage
 
@@ -24,7 +24,7 @@ docker pull mariort/go-base:1.27
 FROM mariort/go-base:1.27
 ```
 
-Tags: `1.27` always points at the latest build, `1.27-YYMMDD` (with `-1`, `-2`, ... for further builds the same day) is the dated build.
+Tags: `1.27` always points at the latest build, and `1.27-YYMMDD` is that day's build, handy for pinning.
 
 ## ⚙️ Defaults
 
@@ -40,8 +40,9 @@ Everything is a plain environment variable, so any project can override it.
 Needs [task](https://taskfile.dev), podman, git and [yq](https://github.com/mikefarah/yq) (v4).
 
 ```sh
-task build:1.27
-task push:1.27
+task build:1.27   # build the image for both architectures
+task tag:1.27     # create the git tag 1.27 and push it, so the release has a history
+task push:1.27    # push to the registries; refuses until the git tag is on origin
 ```
 
-`task` lists everything else. Extra registries can go in a git-ignored `.local/registries.yml` with the same `registries:` list as `versions.yml`.
+`task rebuild:1.27` builds from the past: it checks out the git tag in a temporary worktree and builds there. `task` lists everything else. Extra registries can go in a git-ignored `.local/registries.yml` with the same `registries:` list as `image.yml`.
