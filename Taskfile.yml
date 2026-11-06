@@ -40,9 +40,14 @@ tasks:
       - sh: '! git ls-remote --exit-code --tags origin "refs/tags/{{.TAG}}" > /dev/null 2>&1'
         msg: "Tag '{{.TAG}}' already exists on origin. Tags are never moved: pick a new tag name."
     cmds:
-      # no -f anywhere: an existing tag fails loudly, tags are never moved
-      - git tag {{.TAG}}
+      # no -f anywhere, tags are never moved. A tag already on origin is refused above; one that exists only
+      # locally (an earlier push failed) is pushed as it is, so rerunning this task finishes the job.
       - |
+        if git rev-parse -q --verify "refs/tags/{{.TAG}}" > /dev/null; then
+          echo "Tag {{.TAG}} already exists locally at $(git rev-parse --short "{{.TAG}}^{commit}"): pushing it as it is"
+        else
+          git tag {{.TAG}}
+        fi
         git push origin refs/tags/{{.TAG}} || {
           echo "Tag {{.TAG}} exists locally but was not pushed. Fix the remote, then run: git push origin refs/tags/{{.TAG}}" >&2
           exit 1
