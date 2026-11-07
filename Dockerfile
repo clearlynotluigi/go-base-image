@@ -1,6 +1,7 @@
 ARG GO_VERSION
 
 FROM golang:${GO_VERSION}-alpine
+ARG GOLANG_MIGRATE_VERSION
 ARG GOLANGCI_LINT_VERSION
 ARG GOSEC_VERSION
 ARG GO_DELVE_VERSION
@@ -21,4 +22,5 @@ RUN sh -c "$(curl -sSfL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bi
     curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b ${GOBIN} ${GOLANGCI_LINT_VERSION} && \
     curl -sSfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s -- -b ${GOBIN} ${GOSEC_VERSION} && \
     go install -ldflags "-s -w" github.com/go-delve/delve/cmd/dlv@${GO_DELVE_VERSION} && \
+    go install -ldflags "-s -w" -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@${GOLANG_MIGRATE_VERSION} && \
     go clean -cache -modcache
