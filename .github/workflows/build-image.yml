@@ -1,0 +1,73 @@
+name: Build & Push Multi-Arch Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to build (e.g. 1.x.x or 1.x.x-r2)"
+        required: true
+        type: string
+      ref:
+        description: "Git branch or commit SHA to build from (defaults to main)"
+        required: false
+        default: "main"
+        type: string
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout recipe
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Parse image.yml and tag
+        id: meta
+        run: |
+          TAG="${{ inputs.tag }}"
+          GO_VERSION="${TAG%%-*}"
+          IMAGE=$(yq '.image' image.yml)
+          BUILD_ARGS=$(yq '.args | to_entries | map(.key + "=" + .value) | join("\n")' image.yml)
+          TAGS=$(yq ".registries[] | . + \"/${IMAGE}:${TAG}\"" image.yml)
+
+          echo "go_version=${GO_VERSION}" >> "$GITHUB_OUTPUT"
+          {
+            echo "build_args<<EOF"
+            echo "${BUILD_ARGS}"
+            echo "EOF"
+            echo "tags<<EOF"
+            echo "${TAGS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch manifest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            GO_VERSION=${{ steps.meta.outputs.go_version }}
+            ${{ steps.meta.outputs.build_args }}
+          tags: ${{ steps.meta.outputs.tags }}
