@@ -73,10 +73,3 @@ jobs:
             GO_VERSION=${{ steps.meta.outputs.go_version }}
             ${{ steps.meta.outputs.build_args }}
           tags: ${{ steps.meta.outputs.tags }}
-
-      - name: Delete orphaned untagged package versions
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: ${{ steps.meta.outputs.image }}
-          package-type: container
-          delete-only-untagged-versions: true
