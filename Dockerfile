@@ -1,6 +1,6 @@
 ARG GO_VERSION
 
-# cross-compiles dlv & migrate for TARGETARCH
+# cross-compiles for TARGETARCH
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
 ARG TARGETARCH
 ARG GOLANG_MIGRATE_VERSION
