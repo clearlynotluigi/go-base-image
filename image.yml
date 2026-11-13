@@ -4,7 +4,7 @@
 image: go-base
 
 registries:
-  - docker.io/mariort
+  - ghcr.io/clearlynotluigi
 
 args:
   GOLANG_MIGRATE_VERSION: v4.20.1
